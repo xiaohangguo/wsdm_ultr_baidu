@@ -1,0 +1,4 @@
+# ignore
+*.gz
+*.txt
+*.model
