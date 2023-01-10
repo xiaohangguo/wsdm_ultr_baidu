@@ -47,7 +47,7 @@ model = TransformerModel(
 # load pretrained model
 if config.init_parameters != "":
     print('load warm up model ', config.init_parameters)
-    #if model.mode='xx'
+    #if model.mode='xx'  # todo 
     ptm = paddle.load(config.init_parameters)
     for k, v in model.state_dict().items():
         if not k in ptm:    
@@ -56,7 +56,9 @@ if config.init_parameters != "":
         else:
             print("loading " + k)
             v.set_value(ptm[k])
-    model.expand_emb()        
+    assert train_dataset.vocab_dic ,f'vocab_dic可能为空'
+    model.expand_emb(len(train_dataset.vocab_dic))
+    model.expand_linear(len(train_dataset.vocab_dic))
 scheduler = get_linear_schedule_with_warmup(config.lr, config.warmup_steps,
                                         config.max_steps)
 decay_params = [
@@ -84,11 +86,15 @@ idx = 0
 for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,DwellingTime_label in train_data_loader:
     model.train()
     optimizer.clear_grad()
+    nontext_max_seq_len=config.max_seq_len-(2*config.num_of_nontext_feature)
 
-    masked_src_input, mask_label = mask_data(src_input[:-config.num_of_nontext_feature+1],mask_prob=0.1)
-    masked_src_nontext_input,mask_nontext_label=mask_data(src_input[-config.num_of_nontext_feature:],mask_prob=0.3)
+    masked_src_input, mask_label = mask_data(src_input[: , :nontext_max_seq_len],mask_prob=0.1)
+    masked_src_nontext_input,mask_nontext_label=mask_data(src_input[ : ,nontext_max_seq_len:],mask_prob=0.3)
+
     mask_label = paddle.concat(x=[mask_label,mask_nontext_label],axis=-1) # axis为-1或者1 横向扩展
+    masked_src_input= paddle.concat(x=[masked_src_input,masked_src_nontext_input],axis=-1)
     score, mlm_loss = model(
+
         src=masked_src_input,   # mask data
         src_segment=src_segment, 
         src_padding_mask=src_padding_mask, 

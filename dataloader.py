@@ -15,6 +15,8 @@ import gzip
 from functools import reduce
 from args import config
 import numpy as np
+import time
+#ToDo: Solve issue of seprate random masking of non-text features 
 
 # --------------- data process for  masked language modeling (MLM) ----------------  #
 def prob_mask_like(t, prob):
@@ -93,8 +95,9 @@ config._MASK_ = 3
 '''
 def process_data(query, title, content, nontext_ids,max_seq_len):
     """ process [query, title, content, skip] into a tensor
-        [CLS] + query + [SEP] + title + [SEP] + content + [SEP] + + [SEP] + [PAD]
+        [CLS] + query + [SEP] + title + [SEP] + content + [SEP] + + [SEP] + [PAD]+ [SEP] + [Nontex0]
     """
+    assert len(nontext_ids)==config.num_of_nontext_feature,f"{query, title, content, nontext_ids,max_seq_len}"
     data = [config._CLS_]
     segment = [0]
 
@@ -118,25 +121,49 @@ def process_data(query, title, content, nontext_ids,max_seq_len):
     # data = data + [config._SEP_]
     # segment = segment + [1] * (len(mediaType.split(b'\x01')) + 1)
     # padding 
-    for nontext_feat in nontext_ids :
-        data = data + [nontext_feat]+[config._SEP_]
-        segment = segment + [1]
-    padding_mask = [False] * len(data)
-    if len(data) < max_seq_len: 
-        padding_mask += [True] * (max_seq_len - len(data))
-        data += [config._PAD_] * (max_seq_len - len(data))
-    else:
-        padding_mask = padding_mask[:max_seq_len]
-        data = data[:max_seq_len]
 
+
+    #form padding mask
+    padding_mask = [False] * len(data)
+
+    nontext_max_seq_len=max_seq_len-2*len(nontext_ids)
+
+    if len(data) < nontext_max_seq_len: 
+   
+        # for nontext_feat in nontext_ids :
+        #     data = data + [nontext_feat]+[config._SEP_]
+        #     segment = segment + [1]
+        padding_mask += [True] * (nontext_max_seq_len - len(data))
+        data += [config._PAD_] * (nontext_max_seq_len - len(data))
+        assert len(data) == nontext_max_seq_len,f"{len(data),padding_mask}"
+        
+    else:
+        assert len(data) >= nontext_max_seq_len,"unexpected length"
+        # for nontext_feat in nontext_ids :
+        # data = data + [nontext_feat]+[config._SEP_]
+        # segment = segment + [1]
+        padding_mask = padding_mask[:nontext_max_seq_len]
+        data = data[:nontext_max_seq_len]
+        assert len(data) == nontext_max_seq_len,f"{len(data),padding_mask}"
+
+    for nontext_id in nontext_ids :
+        padding_mask += 2*[False]
+        data = data + [config._SEP_]
+        data = data + [nontext_id]
+        
+    
+    
     # segment id
     if len(segment) < max_seq_len:
         segment += [1] * (max_seq_len-len(segment))
     else:
         segment = segment[:max_seq_len]
+    
+    assert len(segment)==len(padding_mask)==len(data),f"different dim {len(segment),len(padding_mask),len(data),query, title, content, nontext_ids,max_seq_len}"
     padding_mask = paddle.to_tensor(padding_mask, dtype='int32')
     data = paddle.to_tensor(data, dtype="int32")
     segment = paddle.to_tensor(segment, dtype="int32")
+    
     return data, segment, padding_mask
 def process_data_anotate(query, title, content,max_seq_len):
     """ process [query, title, content, skip] into a tensor
@@ -175,7 +202,27 @@ def process_data_anotate(query, title, content,max_seq_len):
     segment = paddle.to_tensor(segment, dtype="int32")
     return data, segment, padding_mask
 global len_voc
+def learn_vocab(file_path):
+    buffer = []
+    len_voc = config.ntokens
+    vocab_dic = {"[OOV]": len_voc + 1}
+    len_voc+=1
+    print('file_path',file_path)
+    with gzip.open(file_path,'rb')  as f:
+
+        for line in tqdm(f.readlines()):
+            line_list = line.strip(b'\n').split(b'\t')
+            if len(line_list) > 6:  # urls
+                nontext_feats = ["pos" + line_list[0].decode("utf-8"), "skip" + line_list[8].decode("utf-8"),
+                                 'Multimedia_Type' + line_list[4].decode("utf-8")]
+                assert len(nontext_feats) == config.num_of_nontext_feature, f"{nontext_feats}"
+                for feat in nontext_feats:
+                    if feat not in vocab_dic:
+                        vocab_dic[feat] = len_voc
+                        len_voc += 1
+    return vocab_dic
 class TrainDataset(IterableDataset):
+
     def __init__(self, directory_path, buffer_size=100000, max_seq_len=128):
         super().__init__()
         self.directory_path = directory_path
@@ -184,13 +231,14 @@ class TrainDataset(IterableDataset):
         random.shuffle(self.files)
         self.cur_query = "#"
         self.max_seq_len = max_seq_len
+        file = 'part-00003.gz'
+        self.vocab_dic = learn_vocab(os.path.join(self.directory_path, file))
 
+        #self.vocab_dic = learn_vocab("/home/hang-disk/桌面/WSDMCUP_BaiduPLM_Paddle/data/debug-data/part-debug.gz")
 
     def __iter__(self):
         buffer = []
-        vocab_dic = dict()
-        len_voc=22000
-        nontext_ids = []
+
         # num_voc, num_voc1 = 0, 1
         for file in self.files:
             print('load file', file)
@@ -199,29 +247,19 @@ class TrainDataset(IterableDataset):
             with gzip.open(os.path.join(self.directory_path, file), 'rb') as f:
                 for line in tqdm(f.readlines()):
                     line_list = line.strip(b'\n').split(b'\t')
+                    nontext_ids = []
                     if len(line_list) == 3:  # new query 
                         self.cur_query = line_list[2] # todo
                     elif len(line_list) > 6:  # urls 
                         title, content, click_label,DisplayedTime_label,DwellingTime_label  =  line_list[2], line_list[3], line_list[5] ,line_list[10],line_list[16]
-                        nontext_feats = ["pos" + str(line_list[0]), "skip"+str(line_list[8]),'Multimedia_Type'+str(line_list[4])]
-                        
-                        # name_p = 'position' + str(position)
-                        # name_s = 'skip' + str(skip)
-                        # if position is not None or skip is not None:
-                        #     if name_s not in vocab_dic:
-                        #         len_voc += 1
-                        #         temp_dict = {name_s :len_voc}
-                        #         vocab_dic.update(**temp_dict)
-                        #     if name_p not in vocab_dic:
-                        #         len_voc+=1
-                        #         temp_dict = {name_p: len_voc}
-                        #         vocab_dic.update(**temp_dict)
-                        
+                        nontext_feats = ["pos" + line_list[0].decode("utf-8") , "skip"+line_list[8].decode("utf-8") ,'Multimedia_Type'+line_list[4].decode("utf-8") ]
+
+                        assert len(nontext_feats)==config.num_of_nontext_feature,f"{nontext_feats}"
                         for feat in nontext_feats:
-                            if feat not in vocab_dic:
-                                vocab_dic[feat]=len_voc
-                                len_voc+=1
-                                nontext_ids.append(vocab_dic[feat])
+                            if feat not in self.vocab_dic:
+                                feat= "[OOV]"
+                            nontext_ids.append(self.vocab_dic[feat])
+                        assert len(nontext_ids)==config.num_of_nontext_feature,f"{nontext_feats,nontext_ids,self.vocab_dic.items()}"
                         try:
                             src_input, segment, src_padding_mask = process_data(self.cur_query, title, content, nontext_ids, self.max_seq_len)
 
@@ -230,15 +268,21 @@ class TrainDataset(IterableDataset):
                         except:
                             print("------------------------error--------------------")
                             pass
+                        #
                         # src_input, segment, src_padding_mask = process_data(self.cur_query, title, content, nontext_ids, self.max_seq_len)
+                        #
                         # buffer.append([src_input, segment, src_padding_mask, float(click_label),float(DisplayedTime_label),float(DwellingTime_label)])
+                        # t1 = time.time()
+
                         # print(buffer)
                     if len(buffer) >= self.buffer_size:
+
                         random.shuffle(buffer)
 
-                        for record in buffer:
-                            yield record
-
+                    for record in buffer:
+                        yield record
+                        # t = time.time()
+                        # print('process_data using time: ', t - t1)
 
 class TestDataset(Dataset):
 
@@ -294,7 +338,7 @@ class TestDataset(Dataset):
             total_qids = []
             total_labels = []
             cur_qids = 0
-            for line in f.readlines():
+            for line in tqdm(f.readlines()):
                 line_list = line.strip(b'\n').split(b'\t')
                 if len(line_list) == 3:  # new query 
                     self.cur_query = line_list[1]
@@ -302,6 +346,7 @@ class TestDataset(Dataset):
                 elif len(line_list) > 6:  # urls 
                     position, title, content, click_label = line_list[0], line_list[2], line_list[3], line_list[5]
                     try:
+
                         src_input, src_segment, src_padding_mask = process_data_anotate(self.cur_query, title, content, self.max_seq_len) #!!!!!!!!!!
                         buffer.append([src_input, src_segment, src_padding_mask])
                         total_qids.append(cur_qids)

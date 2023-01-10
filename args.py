@@ -60,7 +60,7 @@ config._MASK_ = 3
 
 """ The size of training batch should be 'ngpus * nqueriy * n_candidates' """
 config.train_batch_size = config.n_gpus * config.n_queries_for_each_gpu * config.num_candidates
-# config.train_batch_size = 1* 2* 10
+# config.train_batch_size = 1* * 30
 
 """ The size of test batch is flexible. It depends on your memory. """
 

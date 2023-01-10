@@ -104,18 +104,27 @@ class TransformerModel(nn.Layer):
             self.fc2 = nn.Linear(512, 256)
             self.fc3 = nn.Linear(256, 128)
             self.fc4 = nn.Linear(128, 1)
-    def expand_emb(self):
-            total_feature_dim = config.num_of_nontext_feature
-            temp_emb = nn.Embedding(total_feature_dim,self.hidden)
-           # n = len(total_feature_dim)
-            self.pre_train_encoder = nn.Embedding(self.ntoken+total_feature_dim, self.hidden)
-            w0 = paddle.concat(x=[self.token_encoder.weight,temp_emb.weight],axis=0)
-            self.pre_train_encoder.weight.set_value(w0)
-            self.to_logics = nn.Linear(self.hidden, self.ntoken) # ntoken ++ 
-            self.decoder = nn.Linear(self.hidden, 1)
-            self.token_encoder = self.pre_train_encoder
-            assert self.token_encoder.weight.shape[0] == self.ntoken + total_feature_dim
-            del self.pre_train_encoder    
+
+    def expand_emb(self, extened_vocab_size: int):  # len(vocab_dic)
+        total_feature_dim = extened_vocab_size  #
+        temp_emb = nn.Embedding(total_feature_dim, self.hidden)
+        # n = len(total_feature_dim)
+        self.pre_train_encoder = nn.Embedding(self.ntoken + total_feature_dim, self.hidden)
+        w0 = paddle.concat(x=[self.token_encoder.weight, temp_emb.weight], axis=0)
+        self.pre_train_encoder.weight.set_value(w0)
+        self.to_logics = nn.Linear(self.hidden, self.ntoken)  # ntoken ++
+        self.decoder = nn.Linear(self.hidden, 1)
+        self.token_encoder = self.pre_train_encoder
+        assert self.token_encoder.weight.shape[0] == self.ntoken + total_feature_dim
+        del self.pre_train_encoder
+    def expand_linear(self,extened_vocab_size:int):
+        total_feature_dim = extened_vocab_size  #
+        temp_Linear = nn.Linear(self.hidden,total_feature_dim)
+        to_logics = nn.Linear(self.hidden, self.ntoken + total_feature_dim)
+
+        w0 = paddle.concat(x=[self.to_logics.weight, temp_Linear.weight], axis=1)
+        to_logics.weight.set_value(w0)
+        self.to_logics = to_logics
     def forward(self, src, src_segment, src_padding_mask=None, mlm_label=None):
         # add label??
         # import ipdb
@@ -131,6 +140,7 @@ class TransformerModel(nn.Layer):
         token_emb = self.token_encoder(src) # get token embedding
         seg_emb = self.segment_encoder(src_segment)  # get position embedding
         # nontext_emb =
+        #print(token_emb,pos_emb,seg_emb)
         x = token_emb + pos_emb + seg_emb
         x = self.norm_layer(x)
         x = self.dropout(x)
