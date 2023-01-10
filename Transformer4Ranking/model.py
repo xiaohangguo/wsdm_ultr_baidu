@@ -94,6 +94,8 @@ class TransformerModel(nn.Layer):
 
         if mode == 'pretrain':
             self.to_logics = nn.Linear(hidden, ntoken)
+            self.Display_decoder = nn.Linear(hidden,1)
+            self.Dwelling_decoder = nn.Linear(hidden, 1)
             self.decoder = nn.Linear(hidden, 1)
             
 
@@ -159,12 +161,16 @@ class TransformerModel(nn.Layer):
             scores = paddle.squeeze(scores, axis=-1)
             if self.training:
                 logits = self.to_logics(output.transpose([2, 0, 1]))  # shape = [bs, seq_len, num_tokens]
+                pred_disply_time = self.Display_decoder(X)
+                paddle.squeeze(pred_disply_time, axis=-1)
+                pred_dwelling_time = self.Dwelling_decoder(X)
+                paddle.squeeze(pred_dwelling_time, axis=-1)
                 mlm_loss = F.cross_entropy(logits, # shape=[bs, num_class, seq_len]\
                                             paddle.to_tensor(mlm_label, paddle.int64),\
                                             ignore_index=config._PAD_ # _pad
                                 #??            
                         ) 
-                return scores, mlm_loss
+                return scores, mlm_loss , pred_disply_time , pred_dwelling_time
             else:  
                 return scores
         elif self.mode == 'finetune':

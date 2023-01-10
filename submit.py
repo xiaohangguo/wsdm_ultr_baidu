@@ -12,7 +12,7 @@ from Transformer4Ranking.model import *
 from paddle.io import DataLoader
 from dataloader import *
 from args import config
-
+from tqdm import tqdm
 random.seed(config.seed+1)
 random.seed(config.seed)
 np.random.seed(config.seed)
@@ -27,7 +27,7 @@ model = TransformerModel(
     nhead=config.nhead, 
     nlayers=config.nlayers, 
     dropout=config.dropout,
-    mode='finetune'
+    mode='pretrain'
 )
 
 # load pretrained model
@@ -41,13 +41,13 @@ if config.init_parameters != "":
         else:
             print("loading " + k)
             v.set_value(ptm[k])
-
+model.eval()
 test_annotate_dataset = TestDataset(config.test_annotate_path, max_seq_len=config.max_seq_len, data_type='annotate')
 test_annotate_loader = DataLoader(test_annotate_dataset, batch_size=config.eval_batch_size) 
 # evaluate
 total_scores = []
 
-for test_data_batch in test_annotate_loader:
+for test_data_batch in tqdm(test_annotate_loader):
     src_input, src_segment, src_padding_mask, label = test_data_batch
     score = model(
         src=src_input, 

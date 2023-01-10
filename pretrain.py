@@ -18,7 +18,9 @@ from paddle.io import DataLoader
 from metrics import evaluate_all_metric
 from args import config
 import numpy as np
+import paddle.profiler as profiler
 
+p = profiler.Profiler(timer_only=True)
 # control seed
 # 生成随机数，以便固定后续随机数，方便复现代码
 sys.path.append(os.getcwd())
@@ -78,12 +80,20 @@ model.train()  # turn on train mode
 log_interval = config.log_interval
 total_loss = 0
 total_ctr_loss = 0.0
-total_mlm_loss = 0.0 
+total_display_loss = 0.0
+total_dwelling_loss = 0.0
+
+total_mlm_loss = 0.0
 start_time = time.time()
 criterion = nn.BCEWithLogitsLoss()
-
+display_mse_loss = nn.loss.MSELoss()
+dwelling_mse_loss = nn.loss.MSELoss()
 idx = 0
+p.start()
+
 for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,DwellingTime_label in train_data_loader:
+    # p.step()
+    # p.step_info()
     model.train()
     optimizer.clear_grad()
     nontext_max_seq_len=config.max_seq_len-(2*config.num_of_nontext_feature)
@@ -93,7 +103,7 @@ for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,D
 
     mask_label = paddle.concat(x=[mask_label,mask_nontext_label],axis=-1) # axis为-1或者1 横向扩展
     masked_src_input= paddle.concat(x=[masked_src_input,masked_src_nontext_input],axis=-1)
-    score, mlm_loss = model(
+    scores, mlm_loss , pred_disply_time , pred_dwelling_time = model(
 
         src=masked_src_input,   # mask data
         src_segment=src_segment, 
@@ -110,15 +120,21 @@ for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,D
     # )
     
     mlm_loss = paddle.mean(mlm_loss)
+
     # click_label = click_label.cuda()
-    ctr_loss = criterion(score, paddle.to_tensor(click_label, dtype=paddle.float32))
-    loss = 0.0*mlm_loss + ctr_loss
+    ctr_loss = criterion(scores, paddle.to_tensor(click_label, dtype=paddle.float32))
+    display_loss = display_mse_loss(pred_disply_time,paddle.to_tensor(DisplayedTime_label,dtype=paddle.float32))
+    dwelling_loss = dwelling_mse_loss(pred_dwelling_time,paddle.to_tensor(DwellingTime_label,dtype=paddle.float32))
+    loss = mlm_loss + ctr_loss + display_loss + dwelling_loss
     # paddle.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
     loss.backward()
     optimizer.step()
     scheduler.step()
-    total_ctr_loss += ctr_loss.item()
+    total_ctr_loss += ctr_loss.item() # 总的ctr loss
     total_mlm_loss += mlm_loss.item()
+    total_display_loss += display_loss.item() # 总的displayed
+    total_dwelling_loss += dwelling_loss.item()
+
     total_loss += loss.item()
     # log time
     if idx % log_interval == 0:
@@ -127,13 +143,20 @@ for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,D
         cur_loss = total_loss / log_interval
         cur_ctr_loss = total_ctr_loss / log_interval
         cur_mlmloss = total_mlm_loss / log_interval
+        cur_display_loss = total_display_loss / log_interval
+        cur_dwelling_loss = total_dwelling_loss / log_interval
         print(
             f'{idx:5d}th step | '
             f'lr {lr:.3e} | ms/batch {ms_per_batch:5.2f} | '
-            f'ctr {cur_ctr_loss:5.5f} | mlm {cur_mlmloss:5.5f}')
+            f'ctr {cur_ctr_loss:5.5f} | mlm {cur_mlmloss:5.5f} | '
+            f'display {cur_display_loss:5.5f} | dwelling {cur_dwelling_loss:5.5f}')
+
         total_mlm_loss = 0
         total_ctr_loss = 0
+        total_display_loss = 0
+        total_dwelling_loss = 0
         total_loss = 0
+
         start_time = time.time()
 
     # evaluate
@@ -185,3 +208,6 @@ for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,D
                     'save_model/save_steps{}_{:.5f}_{:5f}.model'.format(idx, result_dict_ann['pnr'], result_dict_click['pnr'])
             )
     idx += 1
+
+# p.stop()
+# p.export(path="./profiler_data.json", format="json")
