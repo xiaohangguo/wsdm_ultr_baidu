@@ -18,9 +18,9 @@ from paddle.io import DataLoader
 from metrics import evaluate_all_metric
 from args import config
 import numpy as np
-import paddle.profiler as profiler
+#import paddle.profiler as profiler
 
-p = profiler.Profiler(timer_only=True)
+#p = profiler.Profiler(timer_only=True)
 # control seed
 # 生成随机数，以便固定后续随机数，方便复现代码
 sys.path.append(os.getcwd())
@@ -89,7 +89,7 @@ criterion = nn.BCEWithLogitsLoss()
 display_mse_loss = nn.loss.MSELoss()
 dwelling_mse_loss = nn.loss.MSELoss()
 idx = 0
-p.start()
+#p.start()
 
 for src_input, src_segment, src_padding_mask, click_label ,DisplayedTime_label,DwellingTime_label in train_data_loader:
     # p.step()
