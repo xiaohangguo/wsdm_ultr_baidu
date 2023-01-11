@@ -1,0 +1,13 @@
+python -u finetune.py --emb_dim 768 \
+--ntokens 22872 \
+--nlayer 3 \
+--nhead 12 \
+--dropout 0.1 \
+--buffer_size 20 \
+--eval_batch_size 20 \
+--save_step 250 \
+--eval_step 250 \
+--init_parameters save_steps80000_1.43796.model \
+--n_queries_for_each_gpu 8 --num_candidates 20 \
+--valid_annotate_path ./data/annotate_data/1W_fintune.txt \
+--test_annotate_path ./data/annotate_data/valid_data.txt

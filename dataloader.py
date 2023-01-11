@@ -310,7 +310,7 @@ class TestDataset(Dataset):
         buffer = []
         total_labels = []
         total_freqs = []
-        for line in open(fpath, 'rb'):
+        for line in tqdm(open(fpath, 'rb')):
             line_list = line.strip(b'\n').split(b'\t')
             qid, query, title, content, label, freq = line_list
             if binary_label:
